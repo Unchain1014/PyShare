@@ -24,61 +24,14 @@ class PyKitApp:
         except Exception as e:
             print(f"Error setting icon: {e}")
 
+        self.icon_path = icon_path  # Add this in __init__
+
         # Center the window on the screen
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
         x = (screen_width // 2) - (500 // 2)
         y = (screen_height // 2) - (250 // 2)
         self.root.geometry(f"500x250+{x}+{y}")
-
-        # Get the user's IP address
-        user_ip = self.get_ip_address()
-
-        # Create a frame to hold the labels and buttons
-        label_frame = tk.Frame(root)
-        label_frame.pack(expand=True, pady=20)
-
-        # Add an Entry widget to display the user's IP address (copyable)
-        ip_entry = tk.Entry(
-            label_frame,
-            font=("Arial", 12, "bold"),
-            fg="#333333",
-            justify="center",
-            width=20
-        )
-        ip_entry.insert(0, user_ip)  # Insert the IP address into the Entry widget
-        ip_entry.config(state="readonly")  # Make the Entry widget read-only
-        ip_entry.grid(row=1, column=0, pady=(0, 0), padx=(0, 10))
-
-        # Add a button to copy the IP address to the clipboard
-        copy_button = tk.Button(
-            label_frame,
-            text="Copy",
-            font=("Arial", 10),
-            width=10,  # Set a fixed width for the button
-            command=lambda: self.copy_to_clipboard(user_ip)
-        )
-        copy_button.grid(row=1, column=1)
-
-        # Add an empty Entry widget for pasting an IP address
-        join_entry = tk.Entry(
-            label_frame,
-            font=("Arial", 12, "bold"),
-            fg="#333333",
-            justify="center",
-            width=20
-        )
-        join_entry.grid(row=2, column=0, padx=(0, 10), pady=(10, 0))
-
-        # Add a button to join the entered IP address
-        join_button = tk.Button(
-            label_frame,
-            text="Join",
-            font=("Arial", 10),
-            width=10,  # Set the same fixed width for the button
-            command=lambda: self.join_ip(join_entry.get())  # Attempt to connect to the entered IP
-        )
-        join_button.grid(row=2, column=1, pady=(10, 0))
 
         # Add a status label at the bottom
         self.status_label = tk.Label(
@@ -89,6 +42,13 @@ class PyKitApp:
             bg="#8B0000"  # Deep red for offline
         )
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Get the user's IP address
+        user_ip = self.get_ip_address()
+
+        # Create a frame to hold the labels and buttons
+        label_frame = tk.Frame(root)
+        label_frame.pack(expand=True, pady=20)
 
         # Start checking the connection status
         self.connected_to_client = False
@@ -101,9 +61,48 @@ class PyKitApp:
         self.server_thread = threading.Thread(target=self.start_server, daemon=True)
         self.server_thread.start()
 
-        # Other UI setup...
-        self.connected_to_client = False
-        self.check_connection_status()
+        # Add an Entry widget to display the user's IP address (copyable)
+        ip_entry = tk.Entry(
+            label_frame,
+            font=("Arial", 12),
+            fg="#333333",
+            justify="center",
+            width=30  # Adjust width to accommodate IP and port
+        )
+        ip_with_port = f"{user_ip}:{self.default_port}"  # Combine IP and port
+        ip_entry.insert(0, ip_with_port)  # Insert the IP address and port into the Entry widget
+        ip_entry.config(state="readonly")  # Make the Entry widget read-only
+        ip_entry.grid(row=1, column=0, pady=(0, 0), padx=(0, 10))
+
+        # Add a button to copy the IP address to the clipboard
+        copy_button = tk.Button(
+            label_frame,
+            text="Copy",
+            font=("Arial", 10),
+            width=10,  # Set a fixed width for the button
+            command=lambda: self.copy_to_clipboard(ip_with_port)  # Copy IP and port
+        )
+        copy_button.grid(row=1, column=1)
+
+        # Add an empty Entry widget for pasting an IP address
+        join_entry = tk.Entry(
+            label_frame,
+            font=("Arial", 12),
+            fg="#333333",
+            justify="center",
+            width=30
+        )
+        join_entry.grid(row=2, column=0, padx=(0, 10), pady=(10, 0))
+
+        # Add a button to join the entered IP address
+        join_button = tk.Button(
+            label_frame,
+            text="Join",
+            font=("Arial", 10),
+            width=10,  # Set the same fixed width for the button
+            command=lambda: self.join_ip(join_entry.get())  # Attempt to connect to the entered IP
+        )
+        join_button.grid(row=2, column=1, pady=(10, 0))
 
     def get_ip_address(self):
         """Retrieve the user's local IP address."""
@@ -128,21 +127,62 @@ class PyKitApp:
     def start_server(self):
         """Start a server to listen for incoming connections."""
         try:
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.bind(("", self.default_port))
-            server_socket.listen(1)
-            print(f"Server listening on port {self.default_port}...")
+            server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                server_socket.bind(("", self.default_port))
+                print(f"Server listening on UDP port {self.default_port}...")
+            except OSError as e:
+                print(f"Error binding to port {self.default_port}: {e}")
+                messagebox.showerror("Server Error", f"Could not bind to port {self.default_port}. Is it already in use?")
+                return
 
             while True:
-                client_socket, client_address = server_socket.accept()
-                print(f"Connected to {client_address}")
-                self.connected_to_client = True
-                self.status_label.config(text="Status: CONNECTED", fg="white", bg="#32CD32")  # Soft green
-
-                # Keep the connection open for communication
-                threading.Thread(target=self.handle_client, args=(client_socket,)).start()
+                try:
+                    data, addr = server_socket.recvfrom(1024)
+                    print(f"Received message from {addr}: {data.decode()}")
+                    if data.decode() == "Hello":
+                        # Respond to the peer to complete the hole punching
+                        server_socket.sendto(b"Hello back!", addr)
+                        print(f"Responded to {addr}")
+                        self.connected_to_client = True
+                        self.status_label.config(text="Status: CONNECTED", fg="white", bg="#32CD32")  # Soft green
+                except Exception as e:
+                    print(f"Error receiving data: {e}")
         except Exception as e:
             print(f"Error starting server: {e}")
+
+    def udp_hole_punching(self, local_port, peer_ip, peer_port):
+        """Establish a direct connection using UDP hole punching and enable data exchange."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.bind(("", local_port))
+                print(f"Listening on UDP port {local_port}...")
+
+                # Send a packet to the peer to create a NAT mapping
+                s.sendto(b"Hello", (peer_ip, peer_port))
+                print(f"Sent hole-punching packet to {peer_ip}:{peer_port}")
+
+                # Wait for a response from the peer
+                s.settimeout(5)  # Timeout after 5 seconds
+                data, addr = s.recvfrom(1024)
+                if data.decode() == "Hello back!":
+                    print(f"Connection established with {addr}")
+                    self.connected_to_client = True
+                    self.status_label.config(text="Status: CONNECTED", fg="white", bg="#32CD32")  # Soft green
+
+                    # Start the keep-alive thread
+                    threading.Thread(target=self.keep_alive, args=(peer_ip, peer_port), daemon=True).start()
+
+                    # Start a thread to handle data exchange
+                    threading.Thread(target=self.handle_udp_chat, args=(s, addr), daemon=True).start()
+                else:
+                    raise Exception("Unexpected response")
+        except socket.timeout:
+            print("Connection timed out")
+            messagebox.showerror("Connection Failed", "Connection timed out. NAT traversal failed.")
+        except Exception as e:
+            print(f"Error during hole punching: {e}")
+            messagebox.showerror("Connection Failed", f"Error during connection: {e}")
 
     def join_ip(self, ip_address):
         """Attempt to connect to the entered IP address."""
@@ -151,49 +191,24 @@ class PyKitApp:
             return
 
         try:
-            self.client_socket = socket.create_connection((ip_address, self.default_port), timeout=5)
-            print(f"Connected to {ip_address}:{self.default_port}")
-            self.connected_to_client = True
-            self.status_label.config(text="Status: CONNECTED", fg="white", bg="#32CD32")  # Soft green
-
-            # Keep the connection open for communication
-            threading.Thread(target=self.handle_server, args=(self.client_socket,)).start()
+            peer_ip, peer_port = ip_address.split(":")
+            peer_port = int(peer_port)
+            threading.Thread(target=self.udp_hole_punching, args=(self.default_port, peer_ip, peer_port)).start()
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Please enter a valid IP address and port (e.g., 192.168.1.100:5000).")
         except Exception as e:
-            print(f"Failed to connect to {ip_address}: {e}")
-            messagebox.showerror("Connection Failed", f"Could not connect to {ip_address}.\nError: {e}")
-            self.connected_to_client = False
+            print(f"Failed to initiate connection: {e}")
 
-    def handle_client(self, client_socket):
-        """Handle communication with a connected client."""
+    def keep_alive(self, peer_ip, peer_port):
+        """Send periodic keep-alive packets to the peer."""
         try:
-            while True:
-                # Example: Receive data from the client
-                data = client_socket.recv(1024)
-                if not data:
-                    break
-                print(f"Received: {data.decode()}")
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                while self.connected_to_client:
+                    s.sendto(b"PING", (peer_ip, peer_port))
+                    print(f"Sent keep-alive packet to {peer_ip}:{peer_port}")
+                    threading.Event().wait(5)  # Wait 5 seconds before sending the next packet
         except Exception as e:
-            print(f"Error handling client: {e}")
-        finally:
-            client_socket.close()
-            self.connected_to_client = False
-            print("Client disconnected")
-
-    def handle_server(self, server_socket):
-        """Handle communication with the server."""
-        try:
-            while True:
-                # Example: Receive data from the server
-                data = server_socket.recv(1024)
-                if not data:
-                    break
-                print(f"Received from server: {data.decode()}")
-        except Exception as e:
-            print(f"Error handling server: {e}")
-        finally:
-            server_socket.close()
-            self.connected_to_client = False
-            print("Disconnected from server")
+            print(f"Error in keep-alive: {e}")
 
     def check_connection_status(self):
         """Check the internet connection and update the status label."""
@@ -204,7 +219,9 @@ class PyKitApp:
                 self.status_label.config(text="Status: ONLINE", fg="black", bg="#DDDDDD")  # Light gray
             else:
                 self.status_label.config(text="Status: OFFLINE", fg="white", bg="#8B0000")  # Deep red
-        self.root.after(1000, self.check_connection_status)
+
+        # Schedule the next check
+        self.connection_status_timer = self.root.after(1000, self.check_connection_status)
 
     def is_connected_to_internet(self):
         """Check if the machine is connected to the internet."""
@@ -213,11 +230,98 @@ class PyKitApp:
             return True
         except OSError:
             return False
+        
+    def handle_udp_chat(self, udp_socket, peer_addr):
+        """Handle chat messages over the established UDP connection."""
+        def send_message(event=None):  # Add `event` parameter to handle key binding
+            """Send a message to the peer."""
+            message = chat_entry.get()
+            if message.strip():  # Only send non-empty messages
+                udp_socket.sendto(message.encode(), peer_addr)
+                # Temporarily enable the chat box to insert the message
+                chat_box.config(state="normal")
+                chat_box.insert(tk.END, f"You: {message}\n")
+                chat_box.config(state="disabled")  # Set back to read-only
+                chat_box.see(tk.END)  # Scroll to the latest message
+                chat_entry.delete(0, tk.END)
 
-    def setup_p2p(self):
-        """Placeholder for P2P setup logic."""
-        # This is where the P2P file transfer logic will be implemented
-        pass
+        def receive_messages():
+            """Receive messages from the peer."""
+            try:
+                while self.connected_to_client:
+                    data, addr = udp_socket.recvfrom(1024)
+                    if data:
+                        # Temporarily enable the chat box to insert the message
+                        chat_box.config(state="normal")
+                        chat_box.insert(tk.END, f"Peer: {data.decode()}\n")
+                        chat_box.config(state="disabled")  # Set back to read-only
+                        chat_box.see(tk.END)  # Scroll to the latest message
+            except Exception as e:
+                print(f"Error during chat: {e}")
+            finally:
+                self.connected_to_client = False
+                print("Disconnected from peer")
+
+        # Create the chat window
+        chat_window = tk.Toplevel(self.root)
+        chat_window.title("Chat")
+        chat_window.geometry("400x300")
+        chat_window.iconbitmap(self.icon_path)  # Set the icon for the chat window
+
+        # Chat box (scrollable)
+        chat_box = tk.Text(chat_window, state="disabled", wrap="word", height=15, width=50)
+        chat_box.pack(pady=10, padx=10)
+
+        # Chat entry field
+        chat_entry = tk.Entry(chat_window, font=("Arial", 12))
+        chat_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), pady=(0, 10))
+
+        # Bind the Enter key to the send_message function
+        chat_entry.bind("<Return>", send_message)
+
+        # Send button
+        send_button = tk.Button(chat_window, text="Send", font=("Arial", 10), command=send_message)
+        send_button.pack(side=tk.RIGHT, padx=(0, 10), pady=(0, 10))
+
+        # Start a thread to receive messages
+        threading.Thread(target=receive_messages, daemon=True).start()
+
+    def send_file_udp(self, file_path, peer_ip, peer_port):
+        """Send a file to the peer over UDP."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                with open(file_path, "rb") as f:
+                    while chunk := f.read(1024):  # Read the file in chunks of 1024 bytes
+                        s.sendto(chunk, (peer_ip, peer_port))
+                        print(f"Sent chunk to {peer_ip}:{peer_port}")
+                # Send an empty packet to indicate the end of the file
+                s.sendto(b"", (peer_ip, peer_port))
+                print("File transfer complete.")
+        except Exception as e:
+            print(f"Error sending file: {e}")
+
+    def receive_file_udp(self, save_path, local_port):
+        """Receive a file from the peer over UDP."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.bind(("", local_port))
+                print(f"Listening for file on UDP port {local_port}...")
+                with open(save_path, "wb") as f:
+                    while True:
+                        data, addr = s.recvfrom(1024)
+                        if not data:  # Empty packet indicates the end of the file
+                            break
+                        f.write(data)
+                        print(f"Received chunk from {addr}")
+                print("File received successfully.")
+        except Exception as e:
+            print(f"Error receiving file: {e}")
+
+    def cleanup(self):
+        """Cleanup resources when the program exits."""
+        if hasattr(self, 'connection_status_timer'):
+            self.root.after_cancel(self.connection_status_timer)
+        print("Cleaned up resources.")
 
 if __name__ == "__main__":
     root = tk.Tk()
@@ -235,4 +339,8 @@ if __name__ == "__main__":
         print(f"Error setting icon: {e}")
 
     app = PyKitApp(root)
+
+    # Bind cleanup to the window close event
+    root.protocol("WM_DELETE_WINDOW", lambda: (app.cleanup(), root.destroy()))
+
     root.mainloop()
